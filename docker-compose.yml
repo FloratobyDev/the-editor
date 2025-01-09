@@ -1,0 +1,104 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/usr/src/app  # Standardize path
+      - /usr/src/app/node_modules
+    environment:
+        - REACT_APP_API_URL=http://backend:4000
+    depends_on:
+      - backend
+    networks:
+      - app-network  # Add network
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/src
+          target: /app/src
+          ignore:
+            - node_modules/
+            - .git/
+            - "*.test.ts"
+        - action: rebuild
+          path: ./backend/package.json
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REDIS_PASSWORD=redis_password
+      - NODE_ENV=development
+      - POSTGRES_HOST=postgres  # Add missing DB environment variables
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mydb
+    command: npm run dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:  # Add healthcheck for backend
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mydb
+    networks:
+      - app-network  # Add network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass redis_password
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]  # Add password
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped  # Add restart policy
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
